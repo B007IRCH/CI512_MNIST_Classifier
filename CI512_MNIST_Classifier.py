@@ -1,5 +1,3 @@
-#MNIST Classifier 
-
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -10,46 +8,68 @@ from sklearn.metrics import classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
-import zipfile
 import tkinter as tk
 from tkinter import filedialog
+import kagglehub
 
-# Configure API keys
+# Configure API keys for Kaggle
 os.environ["KAGGLE_USERNAME"] = "kylebirch"
 os.environ["KAGGLE_KEY"] = "c1a2ecd4c8651eb69498103dc7fd144d"
 
-# Function to handle zipped datasets
-def handle_zipped_dataset(zip_path):
-    if not os.path.exists(zip_path):
-        raise FileNotFoundError(f"The file '{zip_path}' does not exist.")
-    extracted_folder = "extracted_data"
-    os.makedirs(extracted_folder, exist_ok=True)
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(extracted_folder)
-    csv_files = [f for f in os.listdir(extracted_folder) if f.endswith('.csv')]
-    if not csv_files:
-        raise ValueError("No CSV files found in the extracted dataset.")
-    return os.path.join(extracted_folder, csv_files[0])
+# Load Fashion MNIST dataset from Kaggle
+def load_fashion_mnist():
+    path = kagglehub.dataset_download("zalando-research/fashionmnist")
+    print(f"Fashion MNIST dataset downloaded to: {path}")
 
-# Function to browse for a file
-def browse_file():
+    # Load training and test data
+    train_data = pd.read_csv(os.path.join(path, "fashion-mnist_train.csv"))
+    test_data = pd.read_csv(os.path.join(path, "fashion-mnist_test.csv"))
+
+    # Extract features and labels
+    x_train = train_data.iloc[:, 1:].values / 255.0
+    y_train = train_data.iloc[:, 0].values
+    x_test = test_data.iloc[:, 1:].values / 255.0
+    y_test = test_data.iloc[:, 0].values
+
+    # Reshape data
+    x_train = x_train.reshape(-1, 28 * 28)
+    x_test = x_test.reshape(-1, 28 * 28)
+
+    # One-hot encode labels
+    y_train = to_categorical(y_train, num_classes=10)
+    y_test = to_categorical(y_test, num_classes=10)
+
+    return x_train, y_train, x_test, y_test
+
+# Load user-provided dataset
+def load_custom_dataset():
     root = tk.Tk()
     root.withdraw()
     file_path = filedialog.askopenfilename(
-        title="Select Dataset",
-        filetypes=[("CSV files", "*.csv"), ("Zip files", "*.zip")]
+        title="Select CSV Dataset",
+        filetypes=[("CSV files", "*.csv")]
     )
+
     if not file_path:
         raise ValueError("No file selected.")
-    return file_path
 
-# Load MNIST dataset
-def load_mnist_data():
-    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
-    x_train = x_train.reshape(-1, 28 * 28) / 255.0
-    x_test = x_test.reshape(-1, 28 * 28) / 255.0
-    y_train = to_categorical(y_train, num_classes=10)
-    y_test = to_categorical(y_test, num_classes=10)
+    data = pd.read_csv(file_path)
+
+    # Assume last column is the label
+    x = data.iloc[:, :-1].values / 255.0
+    y = data.iloc[:, -1].values
+
+    # Reshape if needed
+    x = x.reshape(-1, 28 * 28)
+
+    # One-hot encode labels
+    y = to_categorical(y, num_classes=10)
+
+    # Split into training and testing (80-20 split)
+    split_idx = int(0.8 * len(x))
+    x_train, x_test = x[:split_idx], x[split_idx:]
+    y_train, y_test = y[:split_idx], y[split_idx:]
+
     return x_train, y_train, x_test, y_test
 
 # Train neural network
@@ -62,6 +82,26 @@ def train_neural_network(x_train, y_train, x_test, y_test, input_shape, num_clas
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     history = model.fit(x_train, y_train, validation_data=(x_test, y_test), epochs=10, batch_size=32)
     return model, history
+
+# Plot results
+def plot_results(history):
+    plt.figure(figsize=(10, 5))
+
+    # Loss plot
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['loss'], label='Training Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title('Loss')
+    plt.legend()
+
+    # Accuracy plot
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['accuracy'], label='Training Accuracy')
+    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.title('Accuracy')
+    plt.legend()
+
+    plt.show()
 
 # Evaluate the model
 def evaluate_model(model, x_test, y_test):
@@ -79,22 +119,25 @@ def evaluate_model(model, x_test, y_test):
 
 # Main function
 def main():
-    x_train, y_train, x_test, y_test = load_mnist_data()
+    print("Choose dataset:")
+    print("1. Use Fashion MNIST dataset (Kaggle)")
+    print("2. Upload your own dataset")
+    choice = input("Enter 1 or 2: ").strip()
+
+    if choice == '1':
+        x_train, y_train, x_test, y_test = load_fashion_mnist()
+    elif choice == '2':
+        x_train, y_train, x_test, y_test = load_custom_dataset()
+    else:
+        print("Invalid choice. Exiting.")
+        return
+
     model, history = train_neural_network(x_train, y_train, x_test, y_test, input_shape=(28 * 28,), num_classes=10)
-    
-    # Plot training results
-    plt.plot(history.history['accuracy'], label='Training Accuracy')
-    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
-    plt.legend()
-    plt.title('Accuracy')
-    plt.show()
 
-    plt.plot(history.history['loss'], label='Training Loss')
-    plt.plot(history.history['val_loss'], label='Validation Loss')
-    plt.legend()
-    plt.title('Loss')
-    plt.show()
+    # Plot results
+    plot_results(history)
 
+    # Evaluate model
     evaluate_model(model, x_test, y_test)
 
 if __name__ == "__main__":
